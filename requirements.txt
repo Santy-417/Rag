@@ -1,0 +1,16 @@
+langchain==0.2.14
+langchain-community==0.2.12
+langchain-openai==0.1.23
+chromadb==0.5.5
+pypdf==4.2.0
+streamlit>=1.37.1
+python-dotenv==1.0.1
+tiktoken==0.7.0
+pymupdf==1.24.9
+# Fase 9 - Voz
+streamlit-mic-recorder>=0.0.4
+gTTS>=2.5.0
+openai>=1.40.0
+# Fase 10 - Grafo semántico
+networkx>=3.3
+pyvis>=0.3.2

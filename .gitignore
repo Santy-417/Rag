@@ -1,0 +1,21 @@
+# Secretos — nunca subir al repositorio
+.env
+
+# ChromaDB local — se regenera al procesar el PDF
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
