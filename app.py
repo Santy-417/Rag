@@ -187,9 +187,9 @@ def extract_page_content_with_vision(image_bytes: bytes, page_num: int) -> str:
     import openai
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     b64 = base64.b64encode(image_bytes).decode("utf-8")
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{
             "role": "user",
             "content": [
                 {
@@ -207,11 +207,19 @@ def extract_page_content_with_vision(image_bytes: bytes, page_num: int) -> str:
                 },
             ],
         }],
-        max_tokens=2000,
-    )
-    text = response.choices[0].message.content or ""
-    logger.debug("Página %d — %d caracteres extraídos con visión.", page_num, len(text))
-    return text
+        "max_tokens": 2000,
+    }
+    for attempt in range(5):
+        try:
+            response = client.chat.completions.create(**payload)
+            text = response.choices[0].message.content or ""
+            logger.debug("Página %d — %d caracteres extraídos con visión.", page_num, len(text))
+            return text
+        except openai.RateLimitError as e:
+            wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
+            logger.warning("Rate limit en página %d, reintentando en %ds…", page_num, wait)
+            time.sleep(wait)
+    raise RuntimeError(f"Rate limit persistente después de 5 intentos en página {page_num}.")
 
 
 def load_and_split_pdf(pdf_path: str, progress_callback=None):
