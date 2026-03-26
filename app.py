@@ -122,7 +122,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CHROMA_DIR = os.path.join("data", "chroma")
 MAX_PDF_SIZE_MB = 50
-SIMILARITY_THRESHOLD = 0.3  # Umbral mínimo de relevancia (0-1, mayor = más estricto)
+SIMILARITY_THRESHOLD = 0.1  # Umbral mínimo de relevancia (0-1, mayor = más estricto)
 NO_INFO_PHRASE = "No se encontró información suficiente"  # Frase que indica respuesta vacía
 
 st.set_page_config(

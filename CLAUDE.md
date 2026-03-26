@@ -32,7 +32,7 @@ Single-file application (`app.py`) using Streamlit for UI and LangChain for the 
 **RAG pipeline flow (Chat tab):**
 1. PDF upload → `PyPDFLoader` extracts pages → `RecursiveCharacterTextSplitter` creates chunks (900 chars, 200 overlap, semantic separators)
 2. Chunks → OpenAI `text-embedding-3-small` → persisted in ChromaDB at `data/chroma/`
-3. User query → `check_relevance()` checks similarity threshold (0.3) before invoking LLM — returns "not found" if below threshold
+3. User query → `check_relevance()` checks similarity threshold (0.1) before invoking LLM — returns "not found" if below threshold
 4. MMR retriever (k=6, fetch_k=20, lambda=0.5) → `ConversationalRetrievalChain` with `gpt-4o-mini` → response with page citations
 
 **Voice tab (Fase 9):**
@@ -58,7 +58,7 @@ Single-file application (`app.py`) using Streamlit for UI and LangChain for the 
 **Session state keys:** `chat_history`, `vector_store`, `chain`, `pdf_processed`, `pdf_hash`, `pdf_stats`, `voice_transcript`, `voice_response`, `voice_audio_bytes`, `graph_entities`, `graph_relations`, `graph_html`
 
 **Constants:**
-- `SIMILARITY_THRESHOLD = 0.3` — used only in Chat tab; Voice tab bypasses this
+- `SIMILARITY_THRESHOLD = 0.1` — used only in Chat tab; Voice tab bypasses this. Lowered from 0.3 after finding that `text-embedding-3-small` L2 scores for relevant content often cluster between 0.1–0.3, causing false negatives.
 - `MAX_PDF_SIZE_MB = 50`
 - `CHROMA_DIR = "data/chroma"`
 
