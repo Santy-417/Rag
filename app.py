@@ -123,6 +123,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CHROMA_DIR = os.path.join("data", "chroma")
 MAX_PDF_SIZE_MB = 50
 SIMILARITY_THRESHOLD = 0.3  # Umbral mínimo de relevancia (0-1, mayor = más estricto)
+NO_INFO_PHRASE = "No se encontró información suficiente"  # Frase que indica respuesta vacía
 
 st.set_page_config(
     page_title="📄 RAG PDF Chat",
@@ -851,7 +852,7 @@ with tab_chat:
                             response = st.session_state.chain.invoke({"question": prompt})
                             answer = response.get("answer", "No pude generar una respuesta.")
                             source_docs = response.get("source_documents", [])
-                            source_text = format_sources(source_docs)
+                            source_text = "" if NO_INFO_PHRASE in answer else format_sources(source_docs)
 
                             if DEBUG_RAG:
                                 elapsed = time.time() - start_time
@@ -939,9 +940,9 @@ with tab_voice:
                             {"question": transcript_text}
                         )
                         source_docs = resp.get("source_documents", [])
-                        rag_answer = (
-                            resp.get("answer", "No pude generar una respuesta.")
-                            + format_sources(source_docs)
+                        raw_answer = resp.get("answer", "No pude generar una respuesta.")
+                        rag_answer = raw_answer + (
+                            "" if NO_INFO_PHRASE in raw_answer else format_sources(source_docs)
                         )
 
                         st.session_state.voice_response = rag_answer
@@ -949,7 +950,7 @@ with tab_voice:
                         # Generar audio de respuesta (solo texto, sin citas de página)
                         if GTTS_AVAILABLE:
                             try:
-                                clean_answer = resp.get("answer", rag_answer)
+                                clean_answer = raw_answer
                                 st.session_state.voice_audio_bytes = text_to_speech(clean_answer)
                             except Exception as tts_err:
                                 logger.warning("Error generando TTS: %s", tts_err)
