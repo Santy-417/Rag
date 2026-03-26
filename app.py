@@ -58,16 +58,9 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.chains import ConversationalRetrievalChain
-from langchain.prompts import (
-    ChatPromptTemplate,
-    SystemMessagePromptTemplate,
-    HumanMessagePromptTemplate,
-)
+from langchain_core.documents import Document
 
 # ---------------------------------------------------------------------------
 # Configuración de depuración
@@ -168,10 +161,6 @@ CONTEXTO DEL DOCUMENTO:
 {context}
 """
 
-QA_PROMPT = ChatPromptTemplate.from_messages([
-    SystemMessagePromptTemplate.from_template(SYSTEM_PROMPT),
-    HumanMessagePromptTemplate.from_template("{question}"),
-])
 
 # ---------------------------------------------------------------------------
 # 2. Funciones auxiliares
@@ -227,7 +216,7 @@ def extract_page_content_with_vision(image_bytes: bytes, page_num: int) -> str:
 
 def load_and_split_pdf(pdf_path: str, progress_callback=None):
     """Lee un PDF con visión multimodal (GPT-4o) y lo divide en chunks."""
-    from langchain_core.documents import Document
+
 
     logger.info("Cargando PDF con visión multimodal: %s", pdf_path)
 
@@ -307,42 +296,52 @@ def load_existing_vector_store():
     return vector_store
 
 
+class _DirectRAGChain:
+    """
+    RAG conversacional sin dependencia de langchain.chains.Chain.
+    Compatible con Python 3.14 — usa la API de OpenAI directamente.
+    Misma interfaz: .invoke({"question": str}) → {"answer": str, "source_documents": list}
+    """
+
+    def __init__(self, retriever, k: int = 6):
+        self.retriever = retriever
+        self.k = k
+        self._history: list[tuple[str, str]] = []
+
+    def invoke(self, inputs: dict) -> dict:
+        import openai
+        question = inputs.get("question", "")
+        source_docs = self.retriever.invoke(question)
+        context = "\n\n".join(doc.page_content for doc in source_docs)
+        system_content = SYSTEM_PROMPT.replace("{context}", context)
+
+        messages: list[dict] = [{"role": "system", "content": system_content}]
+        for q, a in self._history[-self.k:]:
+            messages.append({"role": "user", "content": q})
+            messages.append({"role": "assistant", "content": a})
+        messages.append({"role": "user", "content": question})
+
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,
+            max_tokens=1024,
+        )
+        answer = response.choices[0].message.content or ""
+        self._history.append((question, answer))
+        logger.debug("RAG — pregunta: %s | respuesta: %s…", question[:60], answer[:60])
+        return {"answer": answer, "source_documents": source_docs}
+
+
 def get_conversational_chain(vector_store):
     """Construye la cadena RAG conversacional con MMR y prompt grounded."""
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        max_tokens=1024,
-        openai_api_key=OPENAI_API_KEY,
-    )
-
-    # Memoria con ventana deslizante: solo últimos 6 turnos
-    memory = ConversationBufferWindowMemory(
-        k=6,
-        memory_key="chat_history",
-        return_messages=True,
-        output_key="answer",
-    )
-
-    # Retriever MMR: mayor diversidad y cobertura
     retriever = vector_store.as_retriever(
         search_type="mmr",
-        search_kwargs={
-            "k": 6,
-            "fetch_k": 20,
-            "lambda_mult": 0.5,
-        },
+        search_kwargs={"k": 6, "fetch_k": 20, "lambda_mult": 0.5},
     )
-
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=retriever,
-        memory=memory,
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": QA_PROMPT},
-    )
-    logger.info("Cadena RAG conversacional creada (MMR, k=6, grounded prompt).")
-    return chain
+    logger.info("Cadena RAG directa creada (MMR k=6, sin langchain.chains).")
+    return _DirectRAGChain(retriever=retriever, k=6)
 
 
 def check_relevance(vector_store, query: str, threshold: float = SIMILARITY_THRESHOLD):
@@ -571,12 +570,6 @@ def extract_entities_llm(chunks: list) -> tuple:
       - JSON malformado: se captura con try/except y se omite el chunk.
       - Entidades duplicadas: se usa dict para deduplicar por nombre.
     """
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        openai_api_key=OPENAI_API_KEY,
-    )
-
     # Tomar muestra de chunks para no exceder límite de API / costos
     sample = chunks[:min(15, len(chunks))]
     all_entities: dict[str, str] = {}
@@ -593,9 +586,16 @@ def extract_entities_llm(chunks: list) -> tuple:
             '}'
         )
         try:
-            response = llm.invoke(prompt)
+            import openai as _openai
+            _client = _openai.OpenAI(api_key=OPENAI_API_KEY)
+            _resp = _client.chat.completions.create(
+                model="gpt-4o-mini", temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+            response_content = _resp.choices[0].message.content or ""
             # Limpiar posible markdown ```json ... ```
-            raw = response.content.strip()
+            raw = response_content.strip()
             if raw.startswith("```"):
                 raw = re.sub(r"^```[a-z]*\n?", "", raw)
                 raw = re.sub(r"\n?```$", "", raw)
@@ -1082,7 +1082,7 @@ with tab_graph:
                     )
 
                     # Convertir a objetos Document para reusar extract_entities_llm
-                    from langchain_core.documents import Document
+                
                     chunks_for_graph = [
                         Document(page_content=doc, metadata=meta)
                         for doc, meta in zip(
