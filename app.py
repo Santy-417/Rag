@@ -192,18 +192,74 @@ def get_embeddings():
     )
 
 
-def load_and_split_pdf(pdf_path: str):
-    """Lee un PDF y lo divide en chunks optimizados."""
-    logger.info("Cargando PDF: %s", pdf_path)
-    loader = PyPDFLoader(pdf_path)
-    pages = loader.load()
+def extract_page_content_with_vision(image_bytes: bytes, page_num: int) -> str:
+    """Extrae todo el contenido visible de una página PDF usando GPT-4o Vision."""
+    import base64
+    import openai
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Extrae todo el texto visible en esta imagen de página de documento. "
+                        "Incluye texto de capturas de pantalla, tablas, menús, botones y cualquier "
+                        "elemento visual. Preserva la estructura con saltos de línea. "
+                        "No añadas explicaciones, solo el texto extraído."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"},
+                },
+            ],
+        }],
+        max_tokens=2000,
+    )
+    text = response.choices[0].message.content or ""
+    logger.debug("Página %d — %d caracteres extraídos con visión.", page_num, len(text))
+    return text
 
-    if not pages:
+
+def load_and_split_pdf(pdf_path: str, progress_callback=None):
+    """Lee un PDF con visión multimodal (GPT-4o) y lo divide en chunks."""
+    from langchain.schema import Document
+
+    logger.info("Cargando PDF con visión multimodal: %s", pdf_path)
+
+    if not FITZ_AVAILABLE:
+        raise ValueError("PyMuPDF no está instalado. Ejecuta: pip install pymupdf")
+
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+
+    if total_pages == 0:
+        doc.close()
         raise ValueError("El PDF no contiene páginas legibles.")
 
-    logger.info("Páginas encontradas: %d", len(pages))
+    logger.info("Páginas encontradas: %d", total_pages)
 
-    # Chunking optimizado: mayor tamaño + overlap + separadores semánticos
+    pages = []
+    for i, fitz_page in enumerate(doc):
+        if progress_callback:
+            progress_callback(i, total_pages)
+        # Renderizar página como imagen (escala 2x para mejor calidad OCR)
+        mat = fitz.Matrix(2, 2)
+        pix = fitz_page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        text = extract_page_content_with_vision(img_bytes, i + 1)
+        pages.append(Document(
+            page_content=text,
+            metadata={"page": i, "source": pdf_path},
+        ))
+
+    doc.close()
+
+    # Chunking igual que antes
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=900,
         chunk_overlap=200,
@@ -722,26 +778,38 @@ with st.sidebar:
                             uploaded_file.name,
                         )
                     else:
-                        with st.spinner("📖 Leyendo y procesando el PDF…"):
-                            # Guardar temporalmente el archivo subido
-                            with tempfile.NamedTemporaryFile(
-                                delete=False, suffix=".pdf"
-                            ) as tmp:
-                                tmp.write(file_bytes)
-                                tmp_path = tmp.name
+                        # Guardar temporalmente el archivo subido
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".pdf"
+                        ) as tmp:
+                            tmp.write(file_bytes)
+                            tmp_path = tmp.name
 
-                            # Cargar, dividir y generar embeddings
-                            pages, chunks = load_and_split_pdf(tmp_path)
+                        # Progreso página a página con visión multimodal
+                        progress_bar = st.progress(0.0)
+                        status_text = st.empty()
 
-                            # Analizar estadísticas (antes de borrar el temp)
-                            pdf_stats = analyze_pdf_stats(file_bytes, pages)
+                        def update_progress(current, total):
+                            progress_bar.progress((current + 1) / total)
+                            status_text.text(
+                                f"🔍 Analizando página {current + 1} de {total}…"
+                            )
 
-                            # Limpiar archivo temporal
+                        try:
+                            pages, chunks = load_and_split_pdf(
+                                tmp_path, progress_callback=update_progress
+                            )
+                        finally:
+                            progress_bar.empty()
+                            status_text.empty()
                             os.unlink(tmp_path)
 
-                            if not chunks:
-                                st.error("❌ No se generaron chunks del PDF.")
-                                st.stop()
+                        # Analizar estadísticas
+                        pdf_stats = analyze_pdf_stats(file_bytes, pages)
+
+                        if not chunks:
+                            st.error("❌ No se generaron chunks del PDF.")
+                            st.stop()
 
                         with st.spinner("🧠 Generando embeddings (solo una vez)…"):
                             vector_store = create_vector_store(chunks)
