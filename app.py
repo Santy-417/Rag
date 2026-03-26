@@ -930,31 +930,26 @@ with tab_voice:
             if st.button("🤖 Obtener respuesta", use_container_width=True):
                 with st.spinner("Buscando en el documento…"):
                     try:
-                        is_relevant, _ = check_relevance(
-                            st.session_state.vector_store, transcript_text
+                        # Invocar la cadena directamente — el system prompt grounded
+                        # maneja el caso de contexto irrelevante sin necesidad de
+                        # check_relevance(), cuyo threshold numérico (0.3) rechaza
+                        # consultas de voz con vocabulario natural ya que la
+                        # transcripción de Whisper produce distancias L2 más altas.
+                        resp = st.session_state.chain.invoke(
+                            {"question": transcript_text}
                         )
-                        if not is_relevant:
-                            rag_answer = (
-                                "No se encontró información suficiente "
-                                "en el documento para responder esta pregunta."
-                            )
-                        else:
-                            resp = st.session_state.chain.invoke(
-                                {"question": transcript_text}
-                            )
-                            source_docs = resp.get("source_documents", [])
-                            rag_answer = (
-                                resp.get("answer", "No pude generar una respuesta.")
-                                + format_sources(source_docs)
-                            )
+                        source_docs = resp.get("source_documents", [])
+                        rag_answer = (
+                            resp.get("answer", "No pude generar una respuesta.")
+                            + format_sources(source_docs)
+                        )
 
                         st.session_state.voice_response = rag_answer
 
-                        # Generar audio de respuesta
+                        # Generar audio de respuesta (solo texto, sin citas de página)
                         if GTTS_AVAILABLE:
                             try:
-                                # Solo el texto sin fuentes para TTS
-                                clean_answer = resp.get("answer", rag_answer) if is_relevant else rag_answer
+                                clean_answer = resp.get("answer", rag_answer)
                                 st.session_state.voice_audio_bytes = text_to_speech(clean_answer)
                             except Exception as tts_err:
                                 logger.warning("Error generando TTS: %s", tts_err)
