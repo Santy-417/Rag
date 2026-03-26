@@ -911,6 +911,7 @@ with tab_voice:
                 try:
                     transcript = transcribe_audio(audio["bytes"])
                     st.session_state.voice_transcript = transcript
+                    st.session_state["voice_transcript_area"] = transcript
                     st.session_state.voice_response = ""
                     st.session_state.voice_audio_bytes = None
                 except Exception as e:
