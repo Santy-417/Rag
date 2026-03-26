@@ -57,7 +57,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Chroma
@@ -227,7 +227,7 @@ def extract_page_content_with_vision(image_bytes: bytes, page_num: int) -> str:
 
 def load_and_split_pdf(pdf_path: str, progress_callback=None):
     """Lee un PDF con visión multimodal (GPT-4o) y lo divide en chunks."""
-    from langchain.schema import Document
+    from langchain_core.documents import Document
 
     logger.info("Cargando PDF con visión multimodal: %s", pdf_path)
 
@@ -1082,7 +1082,7 @@ with tab_graph:
                     )
 
                     # Convertir a objetos Document para reusar extract_entities_llm
-                    from langchain.schema import Document
+                    from langchain_core.documents import Document
                     chunks_for_graph = [
                         Document(page_content=doc, metadata=meta)
                         for doc, meta in zip(
