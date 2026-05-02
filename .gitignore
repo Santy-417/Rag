@@ -19,3 +19,7 @@ env/
 # IDEs
 .vscode/
 .idea/
+
+# Archivos locales de trabajo
+claude_code_prompt.md
+*.pdf
